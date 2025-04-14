@@ -1,0 +1,7 @@
+[project]
+name = "acedb"
+version = "0.1.0"
+description = "Wrapper for Postgres database"
+
+[project.scripts]
+acedb = "acedb.cli:cli"
