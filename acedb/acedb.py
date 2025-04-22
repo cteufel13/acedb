@@ -2,14 +2,19 @@ import psycopg2
 from pathlib import Path
 import json
 import os
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
+from datetime import datetime, timedelta, timezone
+from dateutil.parser import isoparse
+
 import databento as dbn
+import polars as pl
+import io
 
 CONFIG_PATH = Path.home() / ".acedb" / "config.json"
 
 TYPE_MAP = {
-    "int": "INTEGER",
-    "float": "FLOAT",
+    "int": "NUMERIC",
+    "float": "NUMERIC",
     "string": "VARCHAR(255)",
 }
 
@@ -63,14 +68,104 @@ class AceDB:
             print(f"Dataset {dataset} not found in database. Creating it.")
             self._create_dataset(dataset)
 
+        result = {}
+
         for schema in schemas:
             if not self._check_schma_in_dbase(dataset, schema):
                 print(f"Schema {schema} not found in database. Creating it.")
                 self._create_schema(dataset, schema)
 
-        # Check symbol in database
+            for symbol in symbols:
+                start, end = self._check_symbol_range(dataset, schema, symbol)
+                if start is None or end is None:
+                    cost = self._client.metadata.get_cost(
+                        dataset=dataset,
+                        schema=schema,
+                        symbols=symbol,
+                        start=min_start,
+                        end=max_end,
+                    )
+                    if self._ask_yn(
+                        f"Data not found in database. Do you want to download from {min_start} to {max_end}? This will cost {cost}."
+                    ):
+                        data = self._download_from_dbn(
+                            dataset=dataset,
+                            schema=schema,
+                            symbol=symbol,
+                            start=min_start,
+                            end=max_end,
+                        )
+                        self._insert_db(dataset, schema, data)
+                        result[schema] = data
+                    else:
+                        print(f"Skipping {symbol} in {schema}")
 
+                else:
+                    print(f"Found {symbol} in {schema} from {start} to {end}")
+                    min_start, max_end = self._get_dbn_range(dataset)
+
+                    cost_lower = self._client.metadata.get_cost(
+                        dataset=dataset,
+                        schema=schema,
+                        symbols=symbol,
+                        start=min_start,
+                        end=start,
+                    )
+
+                    if start.date() > min_start.date() and self._ask_yn(
+                        f"Data found in database but incomplete at beginning. Do you want to download from {min_start} to {start}? This will cost {cost_lower}."
+                    ):
+
+                        data = self._download_from_dbn(
+                            dataset=dataset,
+                            schema=schema,
+                            symbol=symbol,
+                            start=min_start,
+                            end=start,
+                        )
+                        self._insert_db(dataset, schema, data)
+
+                    if end < max_end and self._ask_yn(
+                        f"Data found in database but incomplete at end. Do you want to download from {end} to {max_end}? This will cost {cost_lower}."
+                    ):
+                        data = self._download_from_dbn(
+                            dataset=dataset,
+                            schema=schema,
+                            symbol=symbol,
+                            start=end,
+                            end=max_end,
+                        )
+                        self._insert_db(dataset, schema, data)
+
+                result[schema] = self._get_range(dataset, schema, symbol)
+
+        return result
+
+    def disconnect(self):
+        """
+        Disconnect from the database
+        """
         self._disc_db()
+
+    def insert_db(
+        self,
+        dataset: str,
+        schema: str,
+        data: pl.DataFrame,
+    ):
+        """
+        Insert data into the database
+        """
+
+        if not self._check_ds_in_dbase(dataset):
+            print(f"Dataset {dataset} not found in database. Creating it.")
+            self._create_dataset(dataset)
+
+        if not self._check_schma_in_dbase(dataset, schema):
+            print(f"Schema {schema} not found in database. Creating it.")
+            self._create_schema(dataset, schema)
+
+        self._insert_db(dataset, schema, data)
 
     def _load_config(self):
         if not CONFIG_PATH.exists():
@@ -108,9 +203,89 @@ class AceDB:
         self._client = dbn.Historical()
         print("Databento client initialized.")
 
-    def _check_dschma_in_dbase(
-        self, dataset: str, schema: str, symbols: List[str] | str, start, end
-    ) -> bool:
+    def _get_dbn_range(self, dataset):
+
+        rng = self._client.metadata.get_dataset_range(dataset)
+        start_str = rng["start"]
+        end_str = rng["end"]
+        start = isoparse(start_str)
+        end = isoparse(end_str)
+
+        if (
+            end.hour == 4
+            and end.minute == 0
+            and end.second == 0
+            and end.microsecond == 0
+        ):
+            prev = end - timedelta(days=1)
+            end = datetime(
+                prev.year,
+                prev.month,
+                prev.day,
+                23,
+                58,
+                tzinfo=None,
+            )
+
+        return start, end
+
+    def _download_from_dbn(
+        self,
+        dataset: str,
+        schema: str,
+        symbol: str,
+        start: str,
+        end: str,
+    ):
+        """
+        Download data from Databento
+        """
+
+        data = (
+            self._client.timeseries.get_range(
+                dataset=dataset,
+                schema=schema,
+                symbols=symbol,
+                start=start,
+                end=end,
+            )
+            .to_df()
+            .reset_index()
+        )
+        data = pl.from_pandas(data)
+        return data
+
+    def _get_range(self, dataset: str, schema: str, symbol: str):
+        """
+        Get the start and end dates of the schema
+        """
+        dataset = self._convert_for_SQL(dataset)
+        schema = self._convert_for_SQL(schema)
+        symbol = self._convert_for_SQL(symbol)
+
+        start_end_query = f'SELECT * FROM "{dataset}"."{schema}" WHERE symbol = %s'
+        self._cursor.execute(start_end_query, (symbol,))
+        rows = self._cursor.fetchall()
+        columns = [col[0] for col in self._cursor.description]
+        all_data = pl.DataFrame(rows, schema=columns, orient="row")
+
+        return all_data
+
+    def _insert_db(self, dataset: str, schema: str, data: pl.DataFrame):
+
+        cols = data.columns
+        io_buffer = io.StringIO()
+        data.write_csv(io_buffer)
+        io_buffer.seek(0)
+        dataset = self._convert_for_SQL(dataset)
+        schema = self._convert_for_SQL(schema)
+        copy_query = f' COPY "{dataset}"."{schema}" FROM STDIN WITH CSV HEADER'
+
+        self._cursor.copy_expert(copy_query, io_buffer)
+        self._cursor.connection.commit()
+        print(f"Data inserted into {dataset}.{schema}.")
+
+    def _check_dschma_in_dbase(self, dataset: str, schema: str) -> bool:
         """
         Check if the dataset and schema exist in the database
         """
@@ -164,6 +339,11 @@ class AceDB:
 
         cols = self._client.metadata.list_fields(schema, "csv")
 
+        # convert ts_event and ts_recv to timestamp
+        for col in cols:
+            if col["name"] in ("ts_event", "ts_recv"):
+                col["type"] = "timestamp"
+
         # symbol always appears at the end
         cols.append({"name": "symbol", "type": "string"})
 
@@ -191,10 +371,25 @@ class AceDB:
             f"{col['name']} {TYPE_MAP.get(col['type'], col['type'])}" for col in cols
         )
         create_schema_query += f"({col_defs})"
+
         self._cursor.execute(create_schema_query)
         self._cursor.connection.commit()
 
         print(f"Table {schema} created in Schema {dataset}.")
+
+    def _check_symbol_range(self, dataset, schema, symbol) -> Tuple[int, int | None]:
+        """
+        Check the start and end dates of the schema
+        """
+        dataset = self._convert_for_SQL(dataset)
+        schema = self._convert_for_SQL(schema)
+        symbol = self._convert_for_SQL(symbol)
+
+        start_end_query = f'SELECT MIN(ts_event), MAX(ts_event) FROM "{dataset}"."{schema}" WHERE symbol = %s'
+        self._cursor.execute(start_end_query, (symbol,))
+        start, end = self._cursor.fetchone()
+
+        return start, end
 
     def _disc_db(self):
         """
