@@ -1,7 +1,29 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "acedb"
+name = "acedb1"
 version = "0.1.0"
-description = "Wrapper for Postgres database"
+description = "Wrapper for ACE ETH Postgres database"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+  { name = "Carlo Teufel", email = "carlo.teufel@analytics-club.org" }
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+]
+dependencies = [
+    "polars==1.27.1",
+    "psycopg2-binary==2.9.10",
+    "databento==0.52.0",
+    "click==8.1.8",
+    "build==1.2.2.post1",
+    "setuptools==65.5.0",
+]
 
 [project.scripts]
 acedb = "acedb.cli:cli"

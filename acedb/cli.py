@@ -110,7 +110,7 @@ def list_config():
 
 
 @cli.command()
-def db_login():
+def dbn_login():
     """Adds the Databento API key to env variables file"""
 
     db_token = click.prompt("Enter your Databento API key")
@@ -125,7 +125,7 @@ def db_login():
 
 
 @cli.command()
-def db_logout():
+def dbn_logout():
     """Removes the Databento API key from env variables file"""
 
     if "DATABENTO_API_KEY" in os.environ:
