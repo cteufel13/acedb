@@ -50,13 +50,6 @@ dba.insert(dataset = "XNAS.ITCH",schema = "ohlcv-1m", data = your_data)
 
 ```
 
-## API Documentation
-API endpoints are available at `/api/v1/` with the following resources:
-- `/data` - Retrieve stored financial data
-- `/fetch` - Trigger new data pulls from Databento
-- `/status` - Check sync status and database health
-- `/query` - Run custom queries against stored data
-
 ## License
 This project is licensed under the MIT License - see the LICENSE file for details.
 
