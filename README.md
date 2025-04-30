@@ -54,4 +54,4 @@ dba.insert(dataset = "XNAS.ITCH",schema = "ohlcv-1m", data = your_data)
 This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## Contact
-Project Link: [https://github.com/yourusername/acedb](https://github.com/yourusername/acedb)
+Project Link: [https://github.com/yourusername/acedb](https://github.com/cteufel13/acedb)

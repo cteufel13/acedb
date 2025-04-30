@@ -174,7 +174,13 @@ class AceDB:
             raw_config = json.load(config_file)
 
         self.__password = raw_config.get("password")
-        self._config = {k: v for k, v in raw_config.items() if k != "password"}
+
+        if "dbn_token" in raw_config:
+            os.environ["DATABENTO_API_KEY"] = raw_config["dbn_token"]
+
+        self._config = {
+            k: v for k, v in raw_config.items() if k != "password" or k != "dbn_token"
+        }
 
     def _init_db(self):
 
@@ -198,7 +204,7 @@ class AceDB:
     def _init_dbn_client(self):
 
         if "DATABENTO_API_KEY" not in os.environ:
-            raise ValueError("Missing Datebento API key")
+            raise ValueError("Missing Databento API key")
 
         self._client = dbn.Historical()
         print("Databento client initialized.")

@@ -44,7 +44,7 @@ def login():
         conn.close()
         click.echo("Connection successful!")
     except Exception as e:
-        click.echo(f"Connection failed: {e}")
+        click.echo(f"Connection failed: {e}. You may need VPN")
         return
 
     # Ensure the config directory exists
@@ -120,6 +120,15 @@ def dbn_login():
         click.echo("Databento API key cannot be empty.")
         return
 
+    # Adds API key to the config file
+    with open(CONFIG_PATH, "r") as config_file:
+        config = json.load(config_file)
+
+    config["dbn_token"] = db_token
+
+    with open(CONFIG_PATH, "w") as config_file:
+        json.dump(config, config_file)
+
     os.environ["DATABENTO_API_KEY"] = db_token
     click.echo("Databento API key added to environment variables.")
 
@@ -128,11 +137,14 @@ def dbn_login():
 def dbn_logout():
     """Removes the Databento API key from env variables file"""
 
-    if "DATABENTO_API_KEY" in os.environ:
-        del os.environ["DATABENTO_API_KEY"]
-        click.echo("Databento API key removed from environment variables.")
-    else:
-        click.echo("No Databento API key found in environment variables.")
+    with open(CONFIG_PATH, "r") as config_file:
+        config = json.load(config_file)
+        if "dbn_token" in config:
+            del config["db_token"]
+            json.dump(config, config_file)
+            click.echo("Databento API key removed from environment variables.")
+        else:
+            click.echo("No Databento API key found.")
 
 
 if __name__ == "__main__":

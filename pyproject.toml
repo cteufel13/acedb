@@ -3,8 +3,8 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "acedb1"
-version = "0.1.0"
+name = "acedb"
+version = "0.1.1"
 description = "Wrapper for ACE ETH Postgres database"
 readme = "README.md"
 license = { text = "MIT" }

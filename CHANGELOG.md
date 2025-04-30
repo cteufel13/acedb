@@ -4,6 +4,16 @@ _All notable changes to this project will be documented in this file._
 
 This project adheres to [Semantic Versioning](https://semver.org/) and this changelog follows the “Keep a Changelog” format.
 
+
+
+## [0.1.1] - 2025-04-30
+
+### Added
+
+- Added DB key to init so it always gets loaded as env variable
+- Fixed README on Pypi   
+
+
 ## [0.1.0] - 2025-04-23
 
 ### Added 
