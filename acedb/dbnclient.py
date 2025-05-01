@@ -2,6 +2,7 @@ import databento as dbn
 import os
 from datetime import datetime, timedelta, timezone
 from dateutil.parser import isoparse
+from typing import List
 import polars as pl
 
 
@@ -9,7 +10,7 @@ class DBNClient:
     """
     Databento Client Wrapper"""
 
-    def __init__(self, token: str):
+    def __init__(self):
 
         if "DATABENTO_API_KEY" not in os.environ:
             raise ValueError("Missing Databento API key")
@@ -17,7 +18,7 @@ class DBNClient:
         self._client = dbn.Historical()
         print("Databento client initialized.")
 
-    def get_data(
+    def _download_data(
         self,
         dataset: str,
         schema: str,
@@ -29,32 +30,25 @@ class DBNClient:
         Download data from Databento
         """
 
-        data = (
-            self._client.timeseries.get_range(
-                dataset=dataset,
-                schema=schema,
-                symbols=symbol,
-                start=start,
-                end=end,
-            )
-            .to_df()
-            .reset_index()
-        )
+        data = self._client.timeseries.get_range(
+            dataset=dataset,
+            schema=schema,
+            symbols=symbol,
+            start=start,
+            end=end,
+        ).to_df()
         return data
 
-    def get_dataset_range(
+    def _get_dataset_range(
         self,
         dataset: str,
-        start: str,
-        end: str,
-        symbology: str = "default",
     ) -> tuple[datetime, datetime]:
         """
         Get the range of a dataset
         """
-        rng = self._client.metadata.get_dataset_range(dataset)
-        start_str = rng["start"]
-        end_str = rng["end"]
+        range = self._client.metadata.get_dataset_range(dataset)
+        start_str = range["start"]
+        end_str = range["end"]
         start = isoparse(start_str)
         end = isoparse(end_str)
 
@@ -76,35 +70,73 @@ class DBNClient:
 
         return start, end
 
-    def get_columns(
+    def _get_columns(
         self,
         dataset: str,
-        schema: str,
-    ) -> list[str]:
+        schema: str | List[str],
+    ) -> dict[list[str]]:
         """
         Get the columns in the schema from Databento and prepare them for Database
         """
+        if isinstance(schema, str):
+            schema = [schema]
 
-        cols = self._client.metadata.list_fields(schema, "csv")
+        col_dict = {}
 
-        # convert ts_event and ts_recv to timestamp
-        for col in cols:
-            if col["name"] in ("ts_event", "ts_recv"):
-                col["type"] = "timestamp"
+        # validate dataset and schema
+        for s in schema:
+            cols = self._client.metadata.list_fields(s, "csv")
 
-        # symbol always appears at the end
-        cols.append({"name": "symbol", "type": "string"})
+            for col in cols:
+                if col["name"] in ("ts_event", "ts_recv"):
+                    col["type"] = "timestamp"
 
-        return cols
+            # symbol always appears at the end
+            cols.append({"name": "symbol", "type": "string"})
+            col_dict[s] = cols
 
-    def check_dataset(self, dataset: str) -> bool:
+        return col_dict
+
+    def _validate_schema_and_dataset(self, dataset: str, schema: list[str]) -> None:
+        """
+        Validate the dataset and schema in Databento
+        """
+        if not self._validate_dataset(dataset):
+            raise ValueError(f"Dataset {dataset} not found in Databento.")
+        for s in schema:
+            if not self._validate_schema(dataset, s):
+                raise ValueError(f"Schema {s} not found in Databento.")
+
+    def _validate_dataset(self, dataset: str) -> bool:
         if dataset not in self._client.metadata.list_datasets():
             print(f"Dataset {dataset} not found in Databento.")
             return False
         return True
 
-    def check_schema(self, dataset: str, schema: str) -> bool:
+    def _validate_schema(self, dataset: str, schema: str) -> bool:
         if schema not in self._client.metadata.list_schemas(dataset):
             print(f"Schema {schema} not found in Databento.")
             return False
         return True
+
+    def _calculate_cost(
+        self,
+        dataset: str,
+        schema: str,
+        symbol: str,
+        start: str,
+        end: str,
+    ) -> float:
+        """
+        Calculate the cost of downloading data from Databento
+        """
+
+        # Get the size of the data
+        cost = self._client.metadata.get_cost(
+            dataset=dataset,
+            schema=schema,
+            symbols=symbol,
+            start=start,
+            end=end,
+        )
+        return cost

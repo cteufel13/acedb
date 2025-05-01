@@ -9,7 +9,7 @@ class Config:
 
     host: str = None
     port: int = None
-    database: str = None
+    db_name: str = None
     username: str = None
     password: str = None
 
@@ -26,5 +26,5 @@ class Config:
 
         self.host = raw_config.get("host")
         self.port = raw_config.get("port")
-        self.database = raw_config.get("database")
+        self.db_name = raw_config.get("db_name")
         self.username = raw_config.get("username")

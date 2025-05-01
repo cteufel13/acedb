@@ -59,7 +59,15 @@ def login():
 def logout():
     """Logout from the database."""
     if CONFIG_PATH.exists():
-        CONFIG_PATH.unlink()
+        with open(CONFIG_PATH, "w") as config_file:
+            config = json.load(config_file)
+            del config["host"]
+            del config["port"]
+            del config["db_name"]
+            del config["username"]
+            del config["password"]
+            json.dump(config, config_file)
+
         click.echo("Logged out successfully.")
     else:
         click.echo("No active session found.")
