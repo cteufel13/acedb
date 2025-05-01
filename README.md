@@ -42,12 +42,16 @@ data = dba.get(dataset = "XNAS.ITCH",
         schemas=  ["ohlcv-1m","ohlcv-1s"],
         symbols= ['AAPL','GOOGL'] ,
         start="2024-01-02",
-        end="2025-01-02",)
+        end="2025-01-02",
+        use_databento = True)
 
 # Upload Downloaded Data (pd/pl DataFrame)
 
 dba.insert(dataset = "XNAS.ITCH",schema = "ohlcv-1m", data = your_data)
 
+# get current overview of what schemas and the symbols in it exist
+
+dba.get_ranges()
 ```
 
 ## License

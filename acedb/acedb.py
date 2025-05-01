@@ -29,6 +29,9 @@ class AceDB:
         start: str = None,
         end: str = None,
         use_databento: bool = True,
+        download: bool = False,
+        path: str = None,
+        filetype: str = "csv",
         **kwargs,
     ):
         """
@@ -86,24 +89,38 @@ class AceDB:
             dataset=dataset, schemas=schemas, col_dict=col_dict
         )
 
-        result: dict[str, pd.DataFrame] = {}
+        result = {}
 
         if not use_databento:
             for schema in schemas:
+
+                result[schema] = {}
+
                 for symbol in symbols:
-                    result.setdefault(schema, pd.DataFrame()).update(
-                        self.database_client._retrieve_data(
-                            dataset=dataset,
-                            schema=schema,
-                            symbol=symbol,
-                        )
+
+                    result[schema][symbol] = self.database_client._retrieve_data(
+                        dataset=dataset,
+                        schema=schema,
+                        symbol=symbol,
                     )
+
+            if download:
+                print("Downloading data...")
+                self.database_client._download(
+                    data_dict=result,
+                    path=path,
+                    filetype=filetype,
+                )
+
             return result
 
         # Get the start and end date of the dataset
         min_start, max_end = self.databento_client._get_dataset_range(dataset=dataset)
 
         for schema in schemas:
+
+            result[schema] = {}
+
             for symbol in symbols:
                 # Find the start and end date of the schema/symbol in the database
                 db_start, db_end = self.database_client._get_local_range(
@@ -154,11 +171,16 @@ class AceDB:
 
                         print("Data downloaded and inserted into database.")
 
-                result[schema] = self.database_client._retrieve_data(
+                result[schema][symbol] = self.database_client._retrieve_data(
                     dataset=dataset,
                     schema=schema,
                     symbol=symbol,
                 )
+        if download:
+            print("Downloading data...")
+            self.database_client._download(
+                data_dict=result, path=path, filetype=filetype
+            )
         return result
 
     def insert(self, dataset: str, schema: str, data: pd.DataFrame) -> None:

@@ -3,6 +3,7 @@ import io
 from typing import List, Dict, Any, Tuple
 import polars as pl
 import pandas as pd
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
 
@@ -214,6 +215,38 @@ class PostgreDBClient:
         self._cursor.close()
         self._cursor.connection.close()
         print("Database connection closed.")
+
+    def _download(self, data_dict: dict, path: str | Path = None, filetype="csv"):
+        """
+        Download the data from the database
+        """
+        path = Path(path or ".")
+
+        path.mkdir(parents=True, exist_ok=True)
+
+        ext = filetype.lower()
+
+        for schema, symbols in data_dict.items():
+            for symbol, data in symbols.items():
+
+                filepath = (
+                    path
+                    / f"{schema}_{symbol}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{ext}"
+                )
+                writer = getattr(data, f"to_{ext}", None)
+                if writer is None:
+                    raise ValueError(f"Unsupported file type: {ext}")
+
+                kwargs = {}
+                if ext in ("csv", "xls", "xlsx", "html"):
+                    kwargs["index"] = False
+                elif ext == "parquet":
+                    kwargs["compression"] = "gzip"
+                elif ext == "json":
+                    kwargs["orient"] = "records"
+
+                writer(filepath, **kwargs)
+                print(f"Data downloaded to {filepath}")
 
     @staticmethod
     def _convert_for_SQL(terms: List[str] | str) -> List[str]:
