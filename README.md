@@ -43,7 +43,8 @@ data = dba.get(dataset = "XNAS.ITCH",
         symbols= ['AAPL','GOOGL'] ,
         start="2024-01-02",
         end="2025-01-02",
-        use_databento = True)
+        download = True
+        filetype = "csv")
 
 # Upload Downloaded Data (pd/pl DataFrame)
 
