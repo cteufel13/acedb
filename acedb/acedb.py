@@ -28,6 +28,7 @@ class AceDB:
         symbols: List[str] | str,
         start: str = None,
         end: str = None,
+        use_databento: bool = True,
         **kwargs,
     ):
         """
@@ -86,6 +87,18 @@ class AceDB:
         )
 
         result: dict[str, pd.DataFrame] = {}
+
+        if not use_databento:
+            for schema in schemas:
+                for symbol in symbols:
+                    result.setdefault(schema, pd.DataFrame()).update(
+                        self.database_client._retrieve_data(
+                            dataset=dataset,
+                            schema=schema,
+                            symbol=symbol,
+                        )
+                    )
+            return result
 
         # Get the start and end date of the dataset
         min_start, max_end = self.databento_client._get_dataset_range(dataset=dataset)
@@ -206,7 +219,6 @@ class AceDB:
             if dataset
             not in ["public", "qrg_database_s1", "information_schema", "pg_catalog"]
         ]
-        [print(dataset) for dataset in datasets]
 
         for dataset in datasets:
 
