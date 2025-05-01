@@ -172,6 +172,41 @@ class PostgreDBClient:
 
         print(f"Table {schema} created in Schema {dataset}.")
 
+    def _get_datasets(
+        self,
+    ):
+
+        query = (
+            " SELECT schema_name FROM information_schema.schemata ORDER BY schema_name"
+        )
+        self._cursor.execute(query)
+        rows = self._cursor.fetchall()
+        datasets = [row[0] for row in rows]
+        return datasets
+
+    def _get_schemas(self, dataset: str) -> List[str]:
+        """
+        Get the schemas in the database
+        """
+        dataset = self._convert_for_SQL(dataset)
+        query = f"SELECT table_name FROM information_schema.tables WHERE table_schema = '{dataset}'"
+        self._cursor.execute(query)
+        rows = self._cursor.fetchall()
+        schemas = [row[0] for row in rows]
+        return schemas
+
+    def _get_symbols(self, dataset: str, schema: str) -> List[str]:
+        """
+        Get the symbols in the database
+        """
+        dataset = self._convert_for_SQL(dataset)
+        schema = self._convert_for_SQL(schema)
+        query = f'SELECT DISTINCT symbol FROM "{dataset}"."{schema}"'
+        self._cursor.execute(query)
+        rows = self._cursor.fetchall()
+        symbols = [row[0] for row in rows]
+        return symbols
+
     def _disconnect(self):
         """
         Disconnect from the database
