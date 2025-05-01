@@ -8,6 +8,7 @@ from dateutil.parser import isoparse
 
 import databento as dbn
 import polars as pl
+import pandas as pd
 import io
 
 CONFIG_PATH = Path.home() / ".acedb" / "config.json"
@@ -151,7 +152,7 @@ class AceDB:
         self,
         dataset: str,
         schema: str,
-        data: pl.DataFrame,
+        data: pl.DataFrame | pd.DataFrame,
     ):
         """
         Insert data into the database
