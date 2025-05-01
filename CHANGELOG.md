@@ -5,6 +5,15 @@ _All notable changes to this project will be documented in this file._
 This project adheres to [Semantic Versioning](https://semver.org/) and this changelog follows the “Keep a Changelog” format.
 
 
+## [0.1.2] - 2025-05-01
+
+### Changed 
+
+- Refactored Code to be more Object Oriented and less cluttered in one class
+
+### Added
+
+- Added get_ranges() function to get overview of database
 
 ## [0.1.1] - 2025-04-30
 
