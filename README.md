@@ -38,7 +38,7 @@ from acedb import AceDB
 dba = AceDB()
 
 # Retrieve Data
-data = dba.get(dataset = "XNAS.ITCH",
+data = dba.Get(dataset = "XNAS.ITCH",
         schemas=  ["ohlcv-1m","ohlcv-1s"],
         symbols= ['AAPL','GOOGL'] ,
         start="2024-01-02",
