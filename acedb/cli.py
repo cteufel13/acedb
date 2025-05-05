@@ -58,14 +58,23 @@ def login():
 @cli.command()
 def logout():
     """Logout from the database."""
+
+    # Check if the config file exists
     if CONFIG_PATH.exists():
-        with open(CONFIG_PATH, "w") as config_file:
+
+        # Load the config file
+        with open(CONFIG_PATH, "r+") as config_file:
             config = json.load(config_file)
-            del config["host"]
-            del config["port"]
-            del config["db_name"]
-            del config["username"]
-            del config["password"]
+
+        # Set the config values to None
+        config["password"] = None
+        config["username"] = None
+        config["db_name"] = None
+        config["host"] = None
+        config["port"] = None
+
+        # Save the updated config file
+        with open(CONFIG_PATH, "w") as config_file:
             json.dump(config, config_file)
 
         click.echo("Logged out successfully.")
@@ -95,15 +104,28 @@ def check_connection():
         click.echo("Connection successful!")
     except Exception as e:
         click.echo(f"Connection failed: {e}")
+        click.echo(
+            "You may need to connect to VPN. Make sure you are logged in to the database! "
+        )
 
 
 @cli.command()
 def login_status():
     """Check if the user is logged in."""
     if CONFIG_PATH.exists():
-        click.echo("You are logged in.")
+        with open(CONFIG_PATH, "r") as config_file:
+            config = json.load(config_file)
+        if config["username"] is not None:
+            click.echo(f"Logged in as {config['username']}")
+        else:
+            click.echo("Not logged in to DB.")
+
+        if config.get("dbn_token", None) is not None:
+            click.echo(f"Databento API key found.")
+        else:
+            click.echo("Not logged in to Databento.")
     else:
-        click.echo("You are not logged in.")
+        click.echo("No configuration found.")
 
 
 @cli.command()
@@ -124,6 +146,10 @@ def dbn_login():
     db_token = click.prompt("Enter your Databento API key")
     db_token = db_token.strip()
 
+    # Since Login is called from the CLI, we need to ensure the config directory exists
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    # Assue that API key is not empty
     if not db_token:
         click.echo("Databento API key cannot be empty.")
         return
@@ -137,7 +163,9 @@ def dbn_login():
     with open(CONFIG_PATH, "w") as config_file:
         json.dump(config, config_file)
 
+    # Adds API key to the environment variables
     os.environ["DATABENTO_API_KEY"] = db_token
+
     click.echo("Databento API key added to environment variables.")
 
 
@@ -145,14 +173,26 @@ def dbn_login():
 def dbn_logout():
     """Removes the Databento API key from env variables file"""
 
-    with open(CONFIG_PATH, "r") as config_file:
-        config = json.load(config_file)
+    # Check if the config file exists
+    if CONFIG_PATH.exists():
+
+        # Load the config file
+        with open(CONFIG_PATH, "r+") as config_file:
+            config = json.load(config_file)
+
+        # Check if the API key exists in the config file
         if "dbn_token" in config:
-            del config["db_token"]
-            json.dump(config, config_file)
+            config["dbn_token"] = None
+
+            with open(CONFIG_PATH, "w") as config_file:
+                json.dump(config, config_file)
+
             click.echo("Databento API key removed from environment variables.")
         else:
             click.echo("No Databento API key found.")
+
+    else:
+        click.echo("No Config Found.")
 
 
 if __name__ == "__main__":
