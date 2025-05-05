@@ -42,9 +42,9 @@ def login():
             connect_timeout=5,
         )
         conn.close()
-        click.echo("Connection successful!")
+        click.echo("Success: Database connection established.")
     except Exception as e:
-        click.echo(f"Connection failed: {e}. You may need VPN")
+        click.echo(f"Error: Database connection failed - {e}. You may need VPN.")
         return
 
     # Ensure the config directory exists
@@ -53,6 +53,7 @@ def login():
     # Save the configuration to a file
     with open(CONFIG_PATH, "w") as config_file:
         json.dump(config, config_file)
+    click.echo("Success: Login credentials saved.")
 
 
 @cli.command()
@@ -77,16 +78,16 @@ def logout():
         with open(CONFIG_PATH, "w") as config_file:
             json.dump(config, config_file)
 
-        click.echo("Logged out successfully.")
+        click.echo("Success: Logged out from database.")
     else:
-        click.echo("No active session found.")
+        click.echo("Error: No active session found.")
 
 
 @cli.command()
 def check_connection():
     """Check the database connection"""
     if not CONFIG_PATH.exists():
-        click.echo("No configuration found. Please login first.")
+        click.echo("Error: No configuration found. Please login first.")
         return
 
     with open(CONFIG_PATH, "r") as config_file:
@@ -101,11 +102,11 @@ def check_connection():
             password=config["password"],
         )
         conn.close()
-        click.echo("Connection successful!")
+        click.echo("Success: Database connection established.")
     except Exception as e:
-        click.echo(f"Connection failed: {e}")
+        click.echo(f"Error: Database connection failed - {e}")
         click.echo(
-            "You may need to connect to VPN. Make sure you are logged in to the database! "
+            "Info: You may need to connect to VPN. Make sure you are logged in to the database."
         )
 
 
@@ -116,16 +117,16 @@ def login_status():
         with open(CONFIG_PATH, "r") as config_file:
             config = json.load(config_file)
         if config["username"] is not None:
-            click.echo(f"Logged in as {config['username']}")
+            click.echo(f"Info: Logged in as {config['username']}.")
         else:
-            click.echo("Not logged in to DB.")
+            click.echo("Info: Not logged in to database.")
 
         if config.get("dbn_token", None) is not None:
-            click.echo(f"Databento API key found.")
+            click.echo("Info: Databento API key found.")
         else:
-            click.echo("Not logged in to Databento.")
+            click.echo("Info: Not logged in to Databento.")
     else:
-        click.echo("No configuration found.")
+        click.echo("Error: No configuration found.")
 
 
 @cli.command()
@@ -134,9 +135,10 @@ def list_config():
     if CONFIG_PATH.exists():
         with open(CONFIG_PATH, "r") as config_file:
             config = json.load(config_file)
+        click.echo("Info: Current configuration:")
         click.echo(json.dumps(config, indent=4))
     else:
-        click.echo("No configuration found.")
+        click.echo("Error: No configuration found.")
 
 
 @cli.command()
@@ -151,7 +153,7 @@ def dbn_login():
 
     # Assue that API key is not empty
     if not db_token:
-        click.echo("Databento API key cannot be empty.")
+        click.echo("Error: Databento API key cannot be empty.")
         return
 
     # Adds API key to the config file
@@ -166,7 +168,7 @@ def dbn_login():
     # Adds API key to the environment variables
     os.environ["DATABENTO_API_KEY"] = db_token
 
-    click.echo("Databento API key added to environment variables.")
+    click.echo("Success: Databento API key configured.")
 
 
 @cli.command()
@@ -187,12 +189,12 @@ def dbn_logout():
             with open(CONFIG_PATH, "w") as config_file:
                 json.dump(config, config_file)
 
-            click.echo("Databento API key removed from environment variables.")
+            click.echo("Success: Databento API key removed.")
         else:
-            click.echo("No Databento API key found.")
+            click.echo("Info: No Databento API key found.")
 
     else:
-        click.echo("No Config Found.")
+        click.echo("Error: No configuration found.")
 
 
 if __name__ == "__main__":
