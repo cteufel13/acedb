@@ -55,8 +55,12 @@ dba.insert(dataset = "XNAS.ITCH",schema = "ohlcv-1m", data = your_data)
 dba.get_ranges()
 ```
 
+## Planned Features:
+- Adding unconvential/custom data along the lines of news reports/ non databento data
+- Checking for gaps in timeseries in case of issues.
+
 ## License
 This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## Contact
-Project Link: [https://github.com/yourusername/acedb](https://github.com/cteufel13/acedb)
+Project Link: [https://github.com/cteufel13/acedb](https://github.com/cteufel13/acedb)
