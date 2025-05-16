@@ -54,8 +54,9 @@ class PostgreDBClient:
         self, dataset: str, schemas: List[str], col_dict: Dict[str, List[str]]
     ) -> None:
         if not self._check_dataset_in_database(dataset):
+            print("hello")
             self._create_dataset(dataset)
-
+        print(self._check_dataset_in_database(dataset))
         for schema in schemas:
             cols = col_dict.get(schema)
             if not self._check_schema_in_database(dataset, schema):
@@ -152,8 +153,11 @@ class PostgreDBClient:
         """
         dataset = self._convert_for_SQL(dataset)
 
-        create_dataset_query = f"CREATE SCHEMA {dataset}"
+        create_dataset_query = f'CREATE SCHEMA IF NOT EXISTS "{dataset}"'
+        print(create_dataset_query)
         self._cursor.execute(create_dataset_query)
+        self._cursor.connection.commit()
+
         print(f"Dataset {dataset} created.")
 
     def _create_schema(self, dataset: str, schema: str, cols: List[str]):

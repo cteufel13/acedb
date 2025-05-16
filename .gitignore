@@ -174,3 +174,5 @@ cython_debug/
 .pypirc
 .DS_Storetests/*.csv # or just that filename
 .DS_Store
+
+*.csv
