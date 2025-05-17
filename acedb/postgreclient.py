@@ -54,8 +54,9 @@ class PostgreDBClient:
         self, dataset: str, schemas: List[str], col_dict: Dict[str, List[str]]
     ) -> None:
         if not self._check_dataset_in_database(dataset):
+            print("hello")
             self._create_dataset(dataset)
-
+        print(self._check_dataset_in_database(dataset))
         for schema in schemas:
             cols = col_dict.get(schema)
             if not self._check_schema_in_database(dataset, schema):
