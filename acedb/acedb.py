@@ -1,6 +1,7 @@
 from .config import Config
 from typing import List, Dict, Any, Tuple
 from collections import defaultdict
+from dateutil import parser
 
 import pandas as pd
 
@@ -69,6 +70,9 @@ class AceDB:
         # Makes sure schemas and symbols are lists
         schemas = [schemas] if isinstance(schemas, str) else schemas
         symbols = [symbols] if isinstance(symbols, str) else symbols
+
+        start = parser.parse(start) if start else None
+        end = parser.parse(end) if end else None
 
         if not isinstance(schemas, list) or not isinstance(symbols, list):
             raise ValueError("Schemas and symbols must be lists or strings.")

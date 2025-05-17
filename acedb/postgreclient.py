@@ -130,7 +130,6 @@ class PostgreDBClient:
         ds_check_query = "SELECT EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = %s) AS dataset_exists"
         self._cursor.execute(ds_check_query, (dataset,))
         exists = self._cursor.fetchone()
-
         return bool(exists[0])
 
     def _check_schema_in_database(self, dataset: str, schema: str) -> bool:
@@ -152,9 +151,13 @@ class PostgreDBClient:
         """
         dataset = self._convert_for_SQL(dataset)
 
-        create_dataset_query = f"CREATE SCHEMA {dataset}"
+        create_dataset_query = f'CREATE SCHEMA IF NOT EXISTS "{dataset}"'
+        print(create_dataset_query)
         self._cursor.execute(create_dataset_query)
+        self._cursor.connection.commit()
+
         print(f"Dataset {dataset} created.")
+        self._add_perms(dataset)
 
     def _create_schema(self, dataset: str, schema: str, cols: List[str]):
         """
@@ -247,6 +250,18 @@ class PostgreDBClient:
 
                 writer(filepath, **kwargs)
                 print(f"Data downloaded to {filepath}")
+
+    def _add_perms(self, dataset: str):
+        """
+        Add permissions to the dataset and schema
+        """
+        dataset = self._convert_for_SQL(dataset)
+        query = f"GRANT USAGE, CREATE ON SCHEMA {dataset} TO PUBLIC;"
+        query2 = f"""ALTER DEFAULT PRIVILEGES IN SCHEMA {dataset}
+                    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO PUBLIC;"""
+        query += query2
+        self._cursor.execute(query)
+        self._cursor.connection.commit()
 
     @staticmethod
     def _convert_for_SQL(terms: List[str] | str) -> List[str]:
