@@ -33,6 +33,8 @@ class AceDB:
         download: bool = False,
         path: str = None,
         filetype: str = "csv",
+        stype_in="raw_symbol",
+        stype_out="instrument_id",
         **kwargs,
     ):
         """
@@ -76,6 +78,15 @@ class AceDB:
 
         if not isinstance(schemas, list) or not isinstance(symbols, list):
             raise ValueError("Schemas and symbols must be lists or strings.")
+
+        symbols = self.databento_client.resolve_symbology(
+            dataset=dataset,
+            symbol=symbols,
+            stype_in=stype_in,
+            stype_out=stype_out,
+            start=start,
+            end=end,
+        )
 
         # Check if the dataset is valid and exist on databento
         self.databento_client._validate_schema_and_dataset(
@@ -124,7 +135,7 @@ class AceDB:
         for schema in schemas:
 
             result[schema] = {}
-
+            print(len(symbols))
             for symbol in symbols:
                 # Find the start and end date of the schema/symbol in the database
                 db_start, db_end = self.database_client._get_local_range(
@@ -139,9 +150,11 @@ class AceDB:
                     database_range=(db_start, db_end),
                     query_range=(start, end),
                 )
-
                 # If there are no ranges to download, return the data from the database
                 for range_start, range_end in download_ranges:
+                    print(
+                        f"Downloading {schema}/{symbol} from {range_start} to {range_end}"
+                    )
                     cost = self.databento_client._calculate_cost(
                         dataset=dataset,
                         schema=schema,

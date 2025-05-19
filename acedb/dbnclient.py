@@ -119,6 +119,31 @@ class DBNClient:
             return False
         return True
 
+    def resolve_symbology(
+        self,
+        dataset: str,
+        symbol: str,
+        stype_in: str,
+        stype_out: str,
+        start: str,
+        end: str,
+    ) -> str:
+        """
+        Resolve the symbology of a symbol in a dataset
+        """
+        # Get the symbology from Databento
+        symbology = self._client.symbology.resolve(
+            dataset, symbol, stype_in, stype_out, start_date=start, end_date=end
+        )
+        resolved_symbol = symbology["partial"] + symbology["result"].keys()
+
+        if symbology["not_found"] != []:
+            raise ValueError(
+                f"Symbol/s {symbology['not_found']} not found in Databento for dataset {dataset}."
+            )
+
+        return resolved_symbol
+
     def _calculate_cost(
         self,
         dataset: str,
