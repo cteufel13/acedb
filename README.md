@@ -5,6 +5,7 @@ ACEDB is a wrapper for a PostgreSQL database that fetches and retrieves financia
 
 ## Features
 - Seamless integration with Databento API
+- Integration with FRED API
 - Automated data fetching and storage
 - PostgreSQL database management
 - Historical data storage and retrieval
@@ -25,7 +26,10 @@ pip install acedb
 acedb login
 
 # Enter Databento API Token:
-acedb dbn_login
+acedb dbn-login
+
+#Enter FRED API Token:
+acedb fred-login
 
 # Help
 acedb --help

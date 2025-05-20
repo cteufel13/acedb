@@ -42,6 +42,29 @@ class AceDB:
         filetype: str = "csv",
         **kwargs,
     ):
+        """
+        Retrieve data from various sources based on the specified dataset.
+
+        Parameters:
+            dataset (str): The name of the dataset to retrieve data from.
+            schemas (List[str] | str, optional): Schema names for Databento datasets.
+            symbols (List[str] | str, optional): Symbol(s) to retrieve data for.
+            start (str, optional): Start date/time for the data range.
+            end (str, optional): End date/time for the data range.
+            stype_in (str, optional): Input symbol type. Defaults to "raw_symbol".
+            stype_out (str, optional): Output symbol type. Defaults to "instrument_id".
+            use_databento (bool, optional): Whether to source missing data from Databento. Defaults to True.
+            download (bool, optional): Whether to download the data to a file. Defaults to False.
+            path (str, optional): Path to save the downloaded data.
+            filetype (str, optional): File format for downloaded data. Defaults to "csv".
+            **kwargs: Additional arguments to pass to the underlying methods.
+
+        Returns:
+            Dict: Retrieved data organized by schema/symbol.
+
+        Raises:
+            ValueError: If the dataset is not found.
+        """
 
         start = parser.parse(start) if start else 0
         end = parser.parse(end) if end else None
@@ -94,6 +117,29 @@ class AceDB:
         path: str = None,
         filetype: str = "csv",
     ):
+        """
+        Retrieve data from Databento or local database based on specified parameters.
+
+        Parameters:
+            dataset (str): The dataset name from Databento.
+            schemas (List[str] | str): Schema(s) for the Databento data.
+            symbols (List[str] | str): Symbol(s) to retrieve data for.
+            start (str, optional): Start date/time for the data range.
+            end (str, optional): End date/time for the data range.
+            stype_in (str, optional): Input symbol type. Defaults to "raw_symbol".
+            stype_out (str, optional): Output symbol type. Defaults to "instrument_id".
+            use_databento (bool, optional): Whether to source missing data from Databento. Defaults to True.
+            download (bool, optional): Whether to download the data to a file. Defaults to False.
+            path (str, optional): Path to save the downloaded data.
+            filetype (str, optional): File format for downloaded data. Defaults to "csv".
+
+        Returns:
+            Dict: Data organized by schema, with each schema mapping to retrieved data.
+
+        Raises:
+            ValueError: If the provided schema is not found in Databento or if stype_in
+                       is not 'parent' when using .OPT or .FUT symbols.
+        """
 
         symbols = symbols if isinstance(symbols, list) else [symbols]
         schemas = schemas if isinstance(schemas, list) else [schemas]
@@ -264,7 +310,17 @@ class AceDB:
 
     def retrieve_dbn_from_database(self, dataset, schemas, symbols, start, end):
         """
-        Retrieve data from Databento.
+        Retrieve data from the database for the given dataset, schemas, and symbols.
+
+        Parameters:
+            dataset (str): The name of the dataset.
+            schemas (List[str] | str): Schema(s) to retrieve data from.
+            symbols (List[str] | str): Symbol(s) to retrieve data for.
+            start (str): Start date/time for the data range.
+            end (str): End date/time for the data range.
+
+        Returns:
+            Dict: Retrieved data organized by schema.
         """
 
         schemas = schemas if isinstance(schemas, list) else [schemas]
@@ -309,6 +365,21 @@ class AceDB:
         path: str = None,
         filetype: str = "csv",
     ):
+        """
+        Retrieve data from FRED and store it in the database.
+        Parameters:
+            dataset (str): The name of the dataset (should be "FRED").
+            symbols (List[str] | str): Symbol(s) to retrieve data for.
+            start (str, optional): Start date/time for the data range.
+            end (str, optional): End date/time for the data range.
+            download (bool, optional): Whether to download the data to a file. Defaults to False.
+            path (str, optional): Path to save the downloaded data.
+            filetype (str, optional): File format for downloaded data. Defaults to "csv".
+        Returns:
+            Dict: Retrieved data organized by symbol.
+        Raises:
+            ValueError: If the dataset is not "FRED" or if the symbol is not found in FRED.
+        """
 
         symbols = symbols if isinstance(symbols, list) else [symbols]
 
@@ -370,7 +441,13 @@ class AceDB:
 
     def get_ranges(self, dataset: str = None, schema: str = None, symbol: str = None):
         """
-        Get the ranges for a given dataset, schema, and symbol.
+        Retrieve the ranges of data for a given dataset, schema, and symbol.
+        Parameters:
+            dataset (str, optional): The name of the dataset.
+            schema (str, optional): The schema name.
+            symbol (str, optional): The symbol to retrieve ranges for.
+        Returns:
+            Dict: A dictionary containing the ranges of data for the specified dataset, schema, and symbol.
         """
         unique_combos = self._database_client._retrieve_existing_ranges()
         unique_combos = unique_combos.to_dict(orient="records")
@@ -393,6 +470,14 @@ class AceDB:
         return result
 
     def insert(self, dataset: str, schema: str, symbol: str, data: pd.DataFrame):
+        """
+        Insert data into the database for a given dataset, schema, and symbol.
+        Parameters:
+            dataset (str): The name of the dataset.
+            schema (str): The schema name.
+            symbol (str): The symbol to insert data for.
+            data (pd.DataFrame): The data to be inserted.
+        """
 
         dataset = self._check_dataset(dataset)
 
