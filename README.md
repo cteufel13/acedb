@@ -57,8 +57,6 @@ dba.get_ranges()
 
 ## Planned Features:
 - Adding unconvential/custom data along the lines of news reports/ non databento data
-- Checking for gaps in timeseries in case of issues.
-- Options Futures
 - Crypto
 
 ## License

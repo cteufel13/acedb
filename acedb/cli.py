@@ -125,6 +125,12 @@ def login_status():
             click.echo("Info: Databento API key found.")
         else:
             click.echo("Info: Not logged in to Databento.")
+
+        if config.get("fred_token", None) is not None:
+            click.echo("Info: FRED API key found.")
+        else:
+            click.echo("Info: Not logged in to FRED.")
+
     else:
         click.echo("Error: No configuration found.")
 
@@ -172,6 +178,34 @@ def dbn_login():
 
 
 @cli.command()
+def fred_login():
+    """Adds the FRED API key to env variables file"""
+
+    fred_token = click.prompt("Enter your FRED API key")
+    fred_token = fred_token.strip()
+
+    # Since Login is called from the CLI, we need to ensure the config directory exists
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    # Assure that API key is not empty
+    if not fred_token:
+        click.echo("Error: FRED API key cannot be empty.")
+        return
+
+    with open(CONFIG_PATH, "r") as config_file:
+        config = json.load(config_file)
+
+    config["fred_token"] = fred_token
+
+    with open(CONFIG_PATH, "w") as config_file:
+        json.dump(config, config_file)
+
+    os.environ["FRED_API_KEY"] = fred_token
+
+    click.echo("Success: FRED API key configured.")
+
+
+@cli.command()
 def dbn_logout():
     """Removes the Databento API key from env variables file"""
 
@@ -192,6 +226,32 @@ def dbn_logout():
             click.echo("Success: Databento API key removed.")
         else:
             click.echo("Info: No Databento API key found.")
+
+    else:
+        click.echo("Error: No configuration found.")
+
+
+@cli.command()
+def fred_logout():
+    """Removes the FRED API key from env variables file"""
+
+    # Check if the config file exists
+    if CONFIG_PATH.exists():
+
+        # Load the config file
+        with open(CONFIG_PATH, "r+") as config_file:
+            config = json.load(config_file)
+
+        # Check if the API key exists in the config file
+        if "fred_token" in config:
+            config["fred_token"] = None
+
+            with open(CONFIG_PATH, "w") as config_file:
+                json.dump(config, config_file)
+
+            click.echo("Success: FRED API key removed.")
+        else:
+            click.echo("Info: No FRED API key found.")
 
     else:
         click.echo("Error: No configuration found.")

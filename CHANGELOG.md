@@ -5,6 +5,18 @@ _All notable changes to this project will be documented in this file._
 This project adheres to [Semantic Versioning](https://semver.org/) and this changelog follows the “Keep a Changelog” format.
 
 
+## [0.1.4] - 2025-05-05
+
+## Changed
+
+- Bug fixes in the CLI
+
+## [0.1.3] - 2025-05-01
+
+## Added
+
+- Added more features to get_data function()
+
 ## [0.1.2] - 2025-05-01
 
 ### Changed 
