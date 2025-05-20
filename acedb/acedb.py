@@ -4,268 +4,483 @@ from collections import defaultdict
 from dateutil import parser
 
 import pandas as pd
+from pathlib import Path
+from datetime import datetime, timedelta, timezone
+from tqdm import tqdm
 
-from .postgreclient import PostgreDBClient
 from .dbnclient import DBNClient
+from .fredclient import FREDClient
+from .postgreclient import PostgreDBClient
 
 
 class AceDB:
 
     def __init__(self):
         self._config = Config()
-        self.database_client = PostgreDBClient(
+        self._databento_client = DBNClient()
+        self._fred_client = FREDClient()
+        self._database_client = PostgreDBClient(
             host=self._config.host,
             port=self._config.port,
             db_name=self._config.db_name,
             username=self._config.username,
             password=self._config.password,
         )
-        self.databento_client = DBNClient()
 
     def get_data(
         self,
         dataset: str,
-        schemas: List[str] | str,
-        symbols: List[str] | str,
+        schemas: List[str] | str = None,
+        symbols: List[str] | str = None,
         start: str = None,
         end: str = None,
+        stype_in: str = "raw_symbol",
+        stype_out: str = "instrument_id",
         use_databento: bool = True,
         download: bool = False,
         path: str = None,
         filetype: str = "csv",
         **kwargs,
     ):
-        """
-        Retrieves data from Database and Databento to find minimum Cost.
 
-        It will check if the data is already in the database. If not, it will
-        download the data from Databento and insert it into the database.
-        If the data is already in the database, it will retrieve it from there.
-
-
-        Parameters
-        ----------
-        dataset : str
-            This is the name of the dataset as found on databento.
-        schemas : List[str] | str
-            This is a schema as a string or multiple schemas as a list of strings, as found on databento.
-        symbols : List[str] | str
-            This is a symbol as a string or multiple symbols as a list of strings. These are Stock Tickers.
-        start : str, optional
-            This is the start date of the data to be retrieved. The default is None.
-        end : str, optional
-            This is the end date of the data to be retrieved. The default is None.
-
-        Returns
-        -------
-        dict[str, pd.DataFrame]
-            A dictionary of DataFrames, where the keys are the schema names and the values are the DataFrames.
-            Each DataFrame contains the data for the corresponding schema and symbol.
-
-
-        Examples
-        --------
-        >>> acedbget_data(dataset='XNAS.ITCH',schemas='ohlcv-1h',symbols='NVDA',start='2023-01-01',end='2023-01-02')
-        """
-        # Makes sure schemas and symbols are lists
-        schemas = [schemas] if isinstance(schemas, str) else schemas
-        symbols = [symbols] if isinstance(symbols, str) else symbols
-
-        start = parser.parse(start) if start else None
+        start = parser.parse(start) if start else 0
         end = parser.parse(end) if end else None
 
-        if not isinstance(schemas, list) or not isinstance(symbols, list):
-            raise ValueError("Schemas and symbols must be lists or strings.")
+        dataset_exists = self._check_dataset(dataset)
+        if dataset_exists is None:
+            raise ValueError(f"Dataset {dataset} not found")
+        else:
+            self._database_client._ensure_schema(sql_schema=dataset)
 
-        # Check if the dataset is valid and exist on databento
-        self.databento_client._validate_schema_and_dataset(
-            schema=schemas, dataset=dataset
-        )
+        if dataset_exists == "Databento":
+            data = self.get_databento_data(
+                dataset=dataset,
+                schemas=schemas,
+                symbols=symbols,
+                start=start,
+                end=end,
+                stype_in=stype_in,
+                stype_out=stype_out,
+                use_databento=use_databento,
+                download=download,
+                path=path,
+                filetype=filetype,
+            )
+            return data
+        elif dataset_exists == "FRED":
+            data = self.get_FRED_data(
+                dataset=dataset,
+                symbols=symbols,
+                start=start,
+                end=end,
+                download=download,
+                path=path,
+                filetype=filetype,
+            )
+            return data
+        pass
 
-        # Returns the columns of the schema from databento
-        col_dict = self.databento_client._get_columns(
-            dataset=dataset,
-            schema=schemas,
-        )
+    def get_databento_data(
+        self,
+        dataset: str,
+        schemas: List[str] | str,
+        symbols: List[str] | str,
+        start: str = None,
+        end: str = None,
+        stype_in: str = "raw_symbol",
+        stype_out: str = "instrument_id",
+        use_databento: bool = True,
+        download: bool = False,
+        path: str = None,
+        filetype: str = "csv",
+    ):
 
-        # Check if the dataset is valid and exist on database and create the database if not
-        self.database_client._ensure_database_schema(
-            dataset=dataset, schemas=schemas, col_dict=col_dict
-        )
+        symbols = symbols if isinstance(symbols, list) else [symbols]
+        schemas = schemas if isinstance(schemas, list) else [schemas]
 
-        result = {}
-
-        if not use_databento:
-            for schema in schemas:
-
-                result[schema] = {}
-
-                for symbol in symbols:
-
-                    result[schema][symbol] = self.database_client._retrieve_data(
-                        dataset=dataset,
-                        schema=schema,
-                        symbol=symbol,
-                    )
-
-            if download:
-                print("Downloading data...")
-                self.database_client._download(
-                    data_dict=result,
-                    path=path,
-                    filetype=filetype,
-                )
-
-            return result
-
-        # Get the start and end date of the dataset
-        min_start, max_end = self.databento_client._get_dataset_range(dataset=dataset)
-
+        # Make sure all valid schemas are in the database
         for schema in schemas:
-
-            result[schema] = {}
-
-            for symbol in symbols:
-                # Find the start and end date of the schema/symbol in the database
-                db_start, db_end = self.database_client._get_local_range(
-                    dataset=dataset,
-                    schema=schema,
-                    symbol=symbol,
-                )
-
-                # Finds ranges it needs to download from databento
-                download_ranges = self.database_client._find_missing_range(
-                    dataset_range=(min_start, max_end),
-                    database_range=(db_start, db_end),
-                    query_range=(start, end),
-                )
-
-                # If there are no ranges to download, return the data from the database
-                for range_start, range_end in download_ranges:
-                    cost = self.databento_client._calculate_cost(
-                        dataset=dataset,
-                        schema=schema,
-                        symbol=symbol,
-                        start=range_start,
-                        end=range_end,
+            if self._databento_client._validate_schema(dataset, schema):
+                if not self._database_client._check_table_in_database(dataset, schema):
+                    self._database_client._create_table(
+                        sql_schema=dataset,
+                        table_name=schema,
+                        col_dict=self._databento_client._get_col_dict(schema),
                     )
+            else:
+                raise ValueError(f"Schema {schema} not found in Databento.")
 
-                    # Checks if the cost is above a threshold so it doesn't download single data points
-                    if cost > 1e-5:
-                        if not self._ask_yn(
-                            f"Download {schema}/{symbol} from {range_start} to {range_end}? Cost: {cost} [Y/n]"
+        # Just retrieving form database
+        if not use_databento:
+            print("Not sourcing missing data from Databento.")
+
+            symbols = self._databento_client._resolve_symbology(
+                dataset=dataset,
+                symbols=symbols,
+                stype_in=stype_in,
+                stype_out=stype_out,
+                start_date=start,
+                end_date=end,
+            )
+            results = self.retrieve_dbn_from_database(
+                dataset=dataset,
+                schemas=schemas,
+                symbols=symbols,
+                start=start,
+                end=end,
+            )
+        # using databento
+        else:
+            # OPT FUT control flow
+            if any(item.endswith((".OPT", ".FUT")) for item in symbols):
+                if stype_in != "parent":
+                    raise ValueError(
+                        "If looking for .OPT or .FUT symbols, stype_in must be 'parent'."
+                    )
+                print("Just keeping .OPT and .FUT symbols.")
+                symbols = [
+                    symbol for symbol in symbols if symbol.endswith((".FUT", ".OPT"))
+                ]
+                results = {}
+
+                for schema in schemas:
+                    for symbol in symbols:
+                        print(f"Processing symbol {symbol}...")
+                        ranges = self._database_client.retrieve_ranges(
+                            sql_schema=dataset, table_name=schema, symbol=symbol
+                        )
+                        missing_ranges = self._get_missing_ranges(
+                            source_ranges=ranges,
+                            requested_range=(start, end),
+                        )
+                        total_cost = self._databento_client._get_cost(
+                            dataset=dataset,
+                            symbol=symbol,
+                            schema=schema,
+                            ranges=missing_ranges,
+                            stype_in=stype_in,
+                        )
+                        print(f"Cost of {total_cost} for {schema} and {symbol}.")
+                        if total_cost > 0 and self._ask_yn(
+                            f"Cost of {total_cost} for {schema} and {symbol}. Proceed? (y/n): "
                         ):
+                            data = self._databento_client.get_data(
+                                dataset=dataset,
+                                schema=schema,
+                                symbol=symbol,
+                                ranges=missing_ranges,
+                                stype_in=stype_in,
+                            )
+                            self._database_client._insert_data(
+                                sql_schema=dataset,
+                                table_name=schema,
+                                data=data,
+                            )
+                            self._database_client._append_ranges(
+                                sql_schema=dataset,
+                                table_name=schema,
+                                symbol=symbol,
+                                ranges=missing_ranges,
+                            )
+                        else:
+                            print(f"Skipping {schema} and {symbol}.")
                             continue
 
-                        print("Downloading data...")
-                        data = self.databento_client._download_data(
+                child_symbols = self._databento_client._resolve_symbology(
+                    dataset=dataset,
+                    symbols=symbols,
+                    stype_in=stype_in,
+                    stype_out=stype_out,
+                    start_date=start,
+                    end_date=end,
+                )
+                results = self.retrieve_dbn_from_database(
+                    dataset=dataset,
+                    schemas=schemas,
+                    symbols=child_symbols,
+                    start=start,
+                    end=end,
+                )
+
+            # Standard symbol control flow
+            else:
+
+                results = {}
+                for schema in schemas:
+                    for symbol in symbols:
+                        ranges = self._database_client.retrieve_ranges(
+                            sql_schema=dataset, table_name=schema, symbol=symbol
+                        )
+                        missing_ranges = self._get_missing_ranges(
+                            source_ranges=ranges,
+                            requested_range=(start, end),
+                        )
+                        total_cost = self._databento_client._get_cost(
                             dataset=dataset,
-                            schema=schema,
                             symbol=symbol,
-                            start=range_start,
-                            end=range_end,
-                        )
-
-                        print("Inserting data into database...")
-                        self.database_client._insert_database(
-                            dataset=dataset,
                             schema=schema,
-                            data=data,
+                            ranges=missing_ranges,
+                            stype_in=stype_in,
                         )
-
-                        print("Data downloaded and inserted into database.")
-
-                result[schema][symbol] = self.database_client._retrieve_data(
-                    dataset=dataset,
-                    schema=schema,
-                    symbol=symbol,
-                )
-        if download:
-            print("Downloading data...")
-            self.database_client._download(
-                data_dict=result, path=path, filetype=filetype
-            )
-        return result
-
-    def insert(self, dataset: str, schema: str, data: pd.DataFrame) -> None:
-        """
-        Insert data into the database.
-
-        Parameters
-        ----------
-        dataset : str
-            The name of the dataset.
-        schema : str
-            The name of the schema.
-        data : pd.DataFrame
-            The data to be inserted.
-
-        Returns
-        -------
-        None
-        """
-        if not isinstance(data, pd.DataFrame):
-            raise ValueError("Data must be a pandas DataFrame.")
-
-        self.databento_client._validate_schema_and_dataset(
-            schema=schema, dataset=dataset
-        )
-        col_dict = self.databento_client._get_columns(
-            dataset=dataset,
-            schema=schema,
-        )
-
-        assert (
-            data.reset_index() == col_dict[schema]
-        ), "DataFrame columns do not match schema columns."
-
-        self.database_client._ensure_database_schema(
-            dataset=dataset,
-            schemas=[schema],
-            col_dict={schema: col_dict},
-        )
-
-        self.database_client._insert_database(
-            dataset=dataset,
-            schema=schema,
-            data=data,
-        )
-        print("Data inserted into database.")
-
-    def get_ranges(
-        self,
-    ):
-        result = {}
-
-        datasets = self.database_client._get_datasets()
-
-        datasets = [
-            dataset
-            for dataset in datasets
-            if dataset
-            not in ["public", "qrg_database_s1", "information_schema", "pg_catalog"]
-        ]
-
-        for dataset in datasets:
-
-            schemas = self.database_client._get_schemas(dataset=dataset)
-            result[dataset] = {}
-
-            for schema in schemas:
-                symbols = self.database_client._get_symbols(
-                    dataset=dataset,
-                    schema=schema,
-                )
-
-                result[dataset][schema] = {}
-                for symbol in symbols:
-                    start, end = self.database_client._get_local_range(
-                        dataset=dataset,
-                        schema=schema,
-                        symbol=symbol,
+                        if total_cost > 0 and self._ask_yn(
+                            f"Cost of {total_cost} for {schema} and {symbol}. Proceed? (y/n): "
+                        ):
+                            data = self._databento_client.get_data(
+                                dataset=dataset,
+                                schema=schema,
+                                symbol=symbol,
+                                ranges=missing_ranges,
+                            )
+                            self._database_client._insert_data(
+                                sql_schema=dataset,
+                                table_name=schema,
+                                data=data,
+                            )
+                            self._database_client._append_ranges(
+                                sql_schema=dataset,
+                                table_name=schema,
+                                symbol=symbol,
+                                ranges=missing_ranges,
+                            )
+                        else:
+                            print(f"Skipping {schema} and {symbol}.")
+                            continue
+                    results[schema] = self._database_client._retrieve_data(
+                        sql_schema=dataset,
+                        table_name=schema,
+                        symbol=symbols,
+                        start=start,
+                        end=end,
                     )
-                    result[dataset][schema][symbol] = (start, end)
+
+        if download:
+            self._download_data(
+                results_dict=results,
+                path=path,
+                filetype=filetype,
+            )
+
+        return results
+
+    def retrieve_dbn_from_database(self, dataset, schemas, symbols, start, end):
+        """
+        Retrieve data from Databento.
+        """
+
+        schemas = schemas if isinstance(schemas, list) else [schemas]
+        symbols = symbols if isinstance(symbols, list) else [symbols]
+        results = {}
+
+        if len(symbols) > 100:
+            # more efficient querying for large symbol
+            self._database_client._create_temp_symbols(
+                table_name="temp_symbols", symbols=symbols
+            )
+            for schema in schemas:
+                data = self._database_client._retrieve_temp_symbols(
+                    sql_schema=dataset,
+                    table_name=schema,
+                    temp_table_name="temp_symbols",
+                    start=start,
+                    end=end,
+                )
+                results[schema] = data
+
+        else:
+            for schema in schemas:
+                data = self._database_client._retrieve_data(
+                    sql_schema=dataset,
+                    table_name=schema,
+                    symbol=symbols,
+                    start=start,
+                    end=end,
+                )
+                results[schema] = data
+
+        return results
+
+    def get_FRED_data(
+        self,
+        dataset: str,
+        symbols: List[str] | str,
+        start: str = None,
+        end: str = None,
+        download: bool = False,
+        path: str = None,
+        filetype: str = "csv",
+    ):
+
+        symbols = symbols if isinstance(symbols, list) else [symbols]
+
+        results = {}
+
+        for symbol in symbols:
+            print(f"Processing symbol {symbol}...")
+            if not self._fred_client._validate_symbol(symbol):
+                raise ValueError(f"Symbol {symbol} not found in FRED.")
+            elif not self._database_client._check_table_in_database("FRED", symbol):
+                data, col_dict = self._fred_client.get_data(symbol)
+                self._database_client._create_table(
+                    sql_schema="FRED",
+                    table_name=symbol,
+                    col_dict=col_dict,
+                )
+                self._database_client._insert_data(
+                    sql_schema="FRED",
+                    table_name=symbol,
+                    data=data,
+                )
+            else:
+                last_time = self._database_client._get_max_time(
+                    sql_schema="FRED",
+                    table_name=symbol,
+                )
+                data, col_dict = self._fred_client.get_data(
+                    symbol,
+                )
+                if last_time is not None:
+                    data = data[data["ts_event"] > last_time]
+
+                if data.empty:
+                    print(f"No new data for {symbol}.")
+                else:
+                    self._database_client._ensure_columns_exist(
+                        sql_schema="FRED",
+                        table_name=symbol,
+                        col_dict=col_dict,
+                    )
+                    self._database_client._insert_data(
+                        sql_schema="FRED",
+                        table_name=symbol,
+                        data=data,
+                    )
+                    print(f"Inserted {len(data)} rows for {symbol}.")
+
+            results[symbol] = self._database_client._retrieve_data(
+                sql_schema="FRED", table_name=symbol
+            )
+        if download:
+            self._download_data(
+                results_dict=results,
+                path=path,
+                filetype=filetype,
+            )
+
+        return results
+
+    def get_ranges(self, dataset: str = None, schema: str = None, symbol: str = None):
+        """
+        Get the ranges for a given dataset, schema, and symbol.
+        """
+        unique_combos = self._database_client._retrieve_existing_ranges()
+        unique_combos = unique_combos.to_dict(orient="records")
+        result = {}
+        for item in unique_combos:
+            schema = item["schema"]
+            table = item["table"]
+            symbol = item["symbol"]
+            result.setdefault(schema, {}).setdefault(table, {})[symbol] = []
+
+        for schema, tables in result.items():
+            for table, symbols in tables.items():
+                for symbol in symbols.keys():
+                    ranges = self._database_client.retrieve_ranges(
+                        sql_schema=schema, table_name=table, symbol=symbol
+                    )
+                    if ranges:
+                        result[schema][table][symbol] = self._merge_ranges(ranges)
+
         return result
+
+    def insert(self, dataset: str, schema: str, symbol: str, data: pd.DataFrame):
+
+        dataset = self._check_dataset(dataset)
+
+        if dataset == "Databento":
+            if not self._databento_client._validate_schema(dataset, schema):
+                raise ValueError(f"Schema {schema} not found in Databento.")
+            if not self._database_client._check_table_in_database(dataset, schema):
+                self._database_client._create_table(
+                    sql_schema=dataset,
+                    table_name=schema,
+                    col_dict=self._databento_client._get_col_dict(schema),
+                )
+            self._database_client._insert_data(
+                sql_schema=dataset,
+                table_name=schema,
+                data=data,
+            )
+        elif dataset == "FRED":
+            print("No need to insert FRED data. The API is free, just request it.")
+        else:
+            raise ValueError(f"Dataset {dataset} not found.")
+
+    def _check_dataset(self, dataset: str) -> bool:
+        """
+        Check if the dataset exists in the database.
+        """
+        if not dataset:
+            raise ValueError("Dataset cannot be empty.")
+        if not isinstance(dataset, str):
+            raise ValueError("Dataset must be a string.")
+
+        if self._databento_client._validate_dataset(dataset):
+            return "Databento"
+        elif dataset == "FRED":
+            return "FRED"
+        else:
+            print(f"Dataset {dataset} not found in either Databento or FRED.")
+            return None
+
+    def _download_data(
+        self,
+        results_dict: Dict[str, pd.DataFrame] | Dict[str, Dict[str, pd.DataFrame]],
+        path: str,
+        filetype: str,
+    ) -> None:
+        """
+        Download the data to the specified path.
+        """
+
+        path = Path(path or ".")
+
+        path.mkdir(parents=True, exist_ok=True)
+
+        ext = filetype.lower()
+
+        for key, value in results_dict.items():
+            if isinstance(value, dict):
+                for sub_key, sub_value in value.items():
+                    file_path = (
+                        path
+                        / f"{key}_{sub_key}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{ext}"
+                    )
+                    self._download_helper(file_path, ext, sub_value)
+
+            else:
+                file_path = (
+                    path / f"{key}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{ext}"
+                )
+                self._download_helper(file_path, ext, value)
+
+    @staticmethod
+    def _download_helper(file_path: str | Path, ext: str, data: pd.DataFrame) -> None:
+        """
+        Helper function to download data to a specified file path.
+        """
+        writer = getattr(data, f"to_{ext}", None)
+        if writer is None:
+            raise ValueError(f"Unsupported file type: {ext}")
+        kwargs = {}
+        if ext in ("csv", "xls", "xlsx", "html"):
+            kwargs["index"] = False
+        elif ext == "parquet":
+            kwargs["compression"] = "gzip"
+        elif ext == "json":
+            kwargs["orient"] = "records"
+
+        writer(file_path, **kwargs)
+        print(f"Data downloaded to {file_path}")
 
     @staticmethod
     def _ask_yn(question: str) -> bool:
@@ -281,3 +496,61 @@ class AceDB:
             else:
                 print("Please enter 'y' or 'n'.")
                 continue
+
+    @staticmethod
+    def _merge_ranges(
+        source_ranges: List[Tuple[datetime, datetime]],
+    ) -> List[Tuple[str, str]]:
+        """
+        Merge the given ranges with the requested range.
+        """
+        if not source_ranges:
+            return []
+
+        # Sort by start date
+        source_ranges.sort(key=lambda x: x[0])
+        merged = [source_ranges[0]]
+
+        for current_start, current_end in source_ranges[1:]:
+            last_start, last_end = merged[-1]
+
+            # Only merge if last_end == current_start
+            if last_end == current_start:
+                merged[-1] = (last_start, current_end)
+            else:
+                merged.append((current_start, current_end))
+
+        return merged
+
+    @staticmethod
+    def _get_missing_ranges(
+        source_ranges: List[Tuple[datetime, datetime]],
+        requested_range: Tuple[datetime, datetime],
+    ) -> List[Tuple[str, str]]:
+        """
+        Get the missing ranges from the given ranges.
+        """
+        req_start, req_end = requested_range
+        if req_end is None:
+            req_end = (
+                datetime.now(timezone.utc)
+                .replace(hour=0, minute=0, second=0, microsecond=0)
+                .replace(tzinfo=None)
+            )
+        source_ranges = sorted(source_ranges, key=lambda x: x[0])
+
+        missing_ranges = []
+
+        current = req_start
+
+        for start, end in source_ranges:
+            if current < start:
+                missing_ranges.append((current, start))
+            current = max(current, end)
+            if current >= req_end:
+                break
+
+        if current < req_end:
+            missing_ranges.append((current, req_end))
+
+        return missing_ranges

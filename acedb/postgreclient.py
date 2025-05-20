@@ -11,6 +11,9 @@ TYPE_MAP = {
     "int": "NUMERIC",
     "float": "NUMERIC",
     "string": "VARCHAR(255)",
+    "float64": "NUMERIC",
+    "datetime64[ns]": "TIMESTAMP",
+    "datetime64[ns, UTC]": "TIMESTAMP",
 }
 
 
@@ -34,231 +37,305 @@ class PostgreDBClient:
 
         print("Database connection established.")
 
-    def _insert_database(self, dataset: str, schema: str, data: pd.DataFrame) -> None:
-
+    def _insert_data(
+        self, sql_schema: str, table_name: str, data: pd.DataFrame
+    ) -> None:
+        """
+        Insert data into the database.
+        """
         cols = data.columns
         io_buffer = io.StringIO()
-        data.to_csv(io_buffer)
+        data.to_csv(io_buffer, index=False)
         io_buffer.seek(0)
+        sql_schema = self._convert_for_SQL(sql_schema)
+        table_name = self._convert_for_SQL(table_name)
 
-        dataset = self._convert_for_SQL(dataset)
-        schema = self._convert_for_SQL(schema)
-
-        copy_query = f' COPY "{dataset}"."{schema}" FROM STDIN WITH CSV HEADER'
+        copy_query = f' COPY "{sql_schema}"."{table_name}" FROM STDIN WITH CSV HEADER'
 
         self._cursor.copy_expert(copy_query, io_buffer)
         self._cursor.connection.commit()
-        print(f"Data inserted into {dataset}.{schema}.")
+        print(f"Data inserted into {sql_schema}.{table_name}.")
 
-    def _ensure_database_schema(
-        self, dataset: str, schemas: List[str], col_dict: Dict[str, List[str]]
-    ) -> None:
-        if not self._check_dataset_in_database(dataset):
-            print("hello")
-            self._create_dataset(dataset)
-        print(self._check_dataset_in_database(dataset))
-        for schema in schemas:
-            cols = col_dict.get(schema)
-            if not self._check_schema_in_database(dataset, schema):
-                self._create_schema(dataset, schema, cols)
-
-    def _get_local_range(
-        self, dataset: str, schema: str, symbol: str
-    ) -> tuple[datetime, datetime]:
-
-        dataset = self._convert_for_SQL(dataset)
-        schema = self._convert_for_SQL(schema)
-        symbol = self._convert_for_SQL(symbol)
-
-        start_end_query = f'SELECT MIN(ts_event), MAX(ts_event) FROM "{dataset}"."{schema}" WHERE symbol = %s'
-        self._cursor.execute(start_end_query, (symbol,))
-        start, end = self._cursor.fetchone()
-
-        return start, end
-
-    def _retrieve_data(self, dataset: str, schema: str, symbol: str):
-        """
-        Get the start and end dates of the schema
-        """
-        dataset = self._convert_for_SQL(dataset)
-        schema = self._convert_for_SQL(schema)
-        symbol = self._convert_for_SQL(symbol)
-
-        start_end_query = f'SELECT * FROM "{dataset}"."{schema}" WHERE symbol = %s'
-        self._cursor.execute(start_end_query, (symbol,))
-        rows = self._cursor.fetchall()
-        columns = [col[0] for col in self._cursor.description]
-        all_data = pl.DataFrame(rows, schema=columns, orient="row").to_pandas()
-        return all_data
-
-    def _find_missing_range(
+    def _retrieve_data(
         self,
-        dataset_range: tuple[datetime, datetime],
-        database_range: tuple[datetime | None, datetime | None],
-        query_range: tuple[datetime | None, datetime | None],
-    ) -> list[tuple[datetime, datetime]]:
-
-        ds_start, ds_end = dataset_range
-        db_start, db_end = database_range
-        q_start, q_end = query_range
-
-        if q_start is None or q_end is None:
-            q_start = ds_start
-            q_end = ds_end
-
-        if db_start is not None:
-            db_start, db_end = self.drop_tz(db_start), self.drop_tz(db_end)
-        q_start, q_end = self.drop_tz(q_start), self.drop_tz(q_end)
-
-        # If nothing in DB, download full query interval
-        if db_start is None or db_end is None:
-            return [(q_start, q_end)]
-
-        missing = []
-        if q_start < db_start:
-            missing.append((q_start, min(db_start, q_end)))
-        if q_end > db_end:
-            missing.append((max(db_end, q_start), q_end))
-
-        return missing
-
-    def _check_dataset_in_database(self, dataset: str) -> bool:
+        sql_schema: str,
+        table_name: str,
+        symbol: str | List[str] = None,
+        start: datetime = None,
+        end: datetime = None,
+    ) -> pd.DataFrame:
         """
-        Check if the dataset is in the database
-        Databento Dataset is one Schema in DB
+        Retrieve data from the database.
         """
-        dataset = self._convert_for_SQL(dataset)
+        sql_schema = self._convert_for_SQL(sql_schema)
+        table_name = self._convert_for_SQL(table_name)
+
+        if isinstance(symbol, str):
+            symbol = self._convert_for_SQL(symbol)
+            symbol_query = f" WHERE symbol = '{symbol}'"
+        elif isinstance(symbol, list):
+            symbol = [self._convert_for_SQL(s) for s in symbol]
+            symbol_query = f" WHERE symbol IN ({', '.join(map(repr, symbol))})"
+        else:
+            symbol_query = ""
+
+        if start and end:
+            date_query = f" AND ts_event BETWEEN '{start}' AND '{end}'"
+        elif start:
+            date_query = f" AND ts_event >= '{start}'"
+        elif end:
+            date_query = f" AND ts_event <= '{end}'"
+        else:
+            date_query = ""
+
+        select_query = (
+            f'SELECT * FROM "{sql_schema}"."{table_name}" '
+            + f"{symbol_query} {date_query}"
+        )
+        self._cursor.execute(select_query)
+        data = self._cursor.fetchall()
+        columns = [col[0] for col in self._cursor.description]
+        df = pd.DataFrame(data, columns=columns)
+        df["ts_event"] = pd.to_datetime(df["ts_event"], format="%Y-%m-%d %H:%M:%S")
+        df = df.sort_values(by=["ts_event"])
+        return df
+
+    ###### Checking database objects ######
+
+    def _ensure_schema(self, sql_schema: str) -> None:
+        """
+        Ensure the SQL schema is in the correct format.
+        """
+        if not sql_schema:
+            raise ValueError("SQL schema cannot be empty.")
+        if not isinstance(sql_schema, str):
+            raise ValueError("SQL schema must be a string.")
+
+        sql_schema = self._convert_for_SQL(sql_schema)
+
+        if not self._check_schemas_in_database(sql_schema):
+            # Create the schema if it doesn't exist
+            self._create_schema(sql_schema)
+
+    def _check_schemas_in_database(self, sql_schema: str) -> bool:
+        """
+        Check if the schemas exist in the database.
+        """
+        sql_schema = self._convert_for_SQL(sql_schema)
+
         ds_check_query = "SELECT EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = %s) AS dataset_exists"
-        self._cursor.execute(ds_check_query, (dataset,))
-        exists = self._cursor.fetchone()
-        return bool(exists[0])
-
-    def _check_schema_in_database(self, dataset: str, schema: str) -> bool:
-        """
-        Check if the schema is in the database
-        """
-        dataset = self._convert_for_SQL(dataset)
-        schema = self._convert_for_SQL(schema)
-
-        schma_check_query = "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = %s AND  table_name = %s ) AS schema_exists"
-        self._cursor.execute(schma_check_query, (dataset, schema))
+        self._cursor.execute(ds_check_query, (sql_schema,))
         exists = self._cursor.fetchone()
 
         return bool(exists[0])
 
-    def _create_dataset(self, dataset: str):
+    def _check_table_in_database(self, sql_schema: str, table_name: str) -> bool:
         """
-        Create a new dataset in the database
+        Check if the table exists in the database.
         """
-        dataset = self._convert_for_SQL(dataset)
+        sql_schema = self._convert_for_SQL(sql_schema)
+        table_name = self._convert_for_SQL(table_name)
+        table_check_query = "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = %s AND table_name = %s) AS table_exists"
+        self._cursor.execute(table_check_query, (sql_schema, table_name))
+        exists = self._cursor.fetchone()
+        return bool(exists[0])
 
-        create_dataset_query = f'CREATE SCHEMA IF NOT EXISTS "{dataset}"'
-        print(create_dataset_query)
-        self._cursor.execute(create_dataset_query)
+    def _ensure_columns_exist(
+        self, sql_schema: str, table_name: str, col_dict: List[Dict[str, str]]
+    ) -> None:
+        """
+        Ensure the columns exist in the table.
+        """
+        sql_schema = self._convert_for_SQL(sql_schema)
+        table_name = self._convert_for_SQL(table_name)
+
+        for col in col_dict:
+            col_name = self._convert_for_SQL(col["name"])
+            col_type = TYPE_MAP.get(col["type"], col["type"])
+
+            column_check_query = (
+                "SELECT EXISTS (SELECT 1 FROM information_schema.columns "
+                f"WHERE table_schema = %s AND table_name = %s AND column_name = %s) AS column_exists"
+            )
+            self._cursor.execute(column_check_query, (sql_schema, table_name, col_name))
+            exists = self._cursor.fetchone()
+
+            if not exists[0]:
+                alter_table_query = f'ALTER TABLE "{sql_schema}"."{table_name}" ADD COLUMN "{col_name}" {col_type}'
+                self._cursor.execute(alter_table_query)
+                print(f"Column {col_name} added to {sql_schema}.{table_name}.")
+
         self._cursor.connection.commit()
 
-        print(f"Dataset {dataset} created.")
-        self._add_perms(dataset)
+    ##### Time #####
 
-    def _create_schema(self, dataset: str, schema: str, cols: List[str]):
+    def _get_max_time(
+        self, sql_schema: str, table_name: str, symbol: str = None
+    ) -> datetime | None:
         """
-        Create a new schema in the database
+        Get the maximum time from the database.
         """
-        dataset = self._convert_for_SQL(dataset)
-        schema = self._convert_for_SQL(schema)
-        create_schema_query = f'CREATE TABLE IF NOT EXISTS "{dataset}"."{schema}"  '
+        sql_schema = self._convert_for_SQL(sql_schema)
+        table_name = self._convert_for_SQL(table_name)
+        if symbol:
+            symbol = self._convert_for_SQL(symbol)
+            symbol_query = f" WHERE symbol = {symbol}"
+        else:
+            symbol_query = ""
+
+        max_time_query = (
+            f'SELECT MAX(ts_event) FROM "{sql_schema}"."{table_name}" '
+            + f"{symbol_query}"
+        )
+        self._cursor.execute(max_time_query)
+        max_time = self._cursor.fetchone()
+
+        return max_time[0] if max_time[0] else None
+
+    def retrieve_ranges(
+        self, sql_schema: str, table_name: str, symbol
+    ) -> List[Tuple[datetime, datetime]]:
+        """
+        Retrieve the ranges of data for a given symbol.
+        """
+        sql_schema = self._convert_for_SQL(sql_schema)
+        table_name = self._convert_for_SQL(table_name)
+
+        query = f""" SELECT request_start, request_end FROM "time".time_range WHERE "schema" = '{sql_schema}' AND "table" = '{table_name}' AND "symbol" = '{symbol}'"""
+        self._cursor.execute(query)
+        ranges = self._cursor.fetchall()
+
+        return [(r[0], r[1]) for r in ranges]
+
+    def _append_ranges(
+        self,
+        sql_schema: str,
+        table_name: str,
+        symbol: str,
+        ranges: List[Tuple[datetime, datetime]],
+    ) -> None:
+        """
+        Append the ranges of data for a given symbol.
+        """
+        sql_schema = self._convert_for_SQL(sql_schema)
+        table_name = self._convert_for_SQL(table_name)
+
+        for start, end in ranges:
+            query = f""" INSERT INTO "time".time_range ("schema", "table", "symbol", "request_start", "request_end") VALUES ('{sql_schema}', '{table_name}', '{symbol}', '{start}', '{end}')"""
+            self._cursor.execute(query)
+
+        self._cursor.connection.commit()
+
+    def _retrieve_existing_ranges(self):
+
+        query = (
+            """ SELECT DISTINCT "schema", "table", "symbol" FROM "time".time_range"""
+        )
+        self._cursor.execute(query)
+        data = self._cursor.fetchall()
+        df = pd.DataFrame(data, columns=[col[0] for col in self._cursor.description])
+        df["schema"] = df["schema"].str.replace("_", ".")
+        df["table"] = df["table"].str.replace("_", "-")
+        return df
+
+    ##### Create Database Objects #####
+
+    def _create_schema(self, sql_schema: str) -> None:
+        """
+        Create the schema in the database.
+        """
+        create_schema_query = f'CREATE SCHEMA IF NOT EXISTS "{sql_schema}"'
+        self._cursor.execute(create_schema_query)
+        self._cursor.connection.commit()
+        print(f"Schema {sql_schema} created.")
+        self._add_permissions(sql_schema)
+
+    def _create_table(
+        self, sql_schema: str, table_name: str, col_dict: List[Dict[str, str]]
+    ) -> None:
+        """
+        Create a table in the database.
+        """
+        sql_schema = self._convert_for_SQL(sql_schema)
+        table_name = self._convert_for_SQL(table_name)
+
+        create_schema_query = (
+            f'CREATE TABLE IF NOT EXISTS "{sql_schema}"."{table_name}"  '
+        )
         col_defs = ",\n    ".join(
-            f"{col['name']} {TYPE_MAP.get(col['type'], col['type'])}" for col in cols
+            f'"{col["name"]}" {TYPE_MAP.get(col["type"], col["type"])}'
+            for col in col_dict
         )
         create_schema_query += f"({col_defs})"
 
         self._cursor.execute(create_schema_query)
         self._cursor.connection.commit()
 
-        print(f"Table {schema} created in Schema {dataset}.")
+        print(f"Table {table_name} created in Schema {sql_schema}.")
 
-    def _get_datasets(
+    ##### Temporary Table #####
+
+    def _create_temp_symbols(self, table_name: str, symbols) -> None:
+        """
+        Create a temporary table in the database.
+        """
+        create_temp_table_query = f"CREATE TEMP TABLE {table_name} (symbol TEXT)"
+        self._cursor.execute(create_temp_table_query)
+
+        buffer = io.StringIO()
+        for symbol in symbols:
+            buffer.write(f"{symbol}\n")
+        buffer.seek(0)
+        buffer.seek(0)
+
+        self._cursor.copy_expert("COPY temp_symbols (symbol) FROM STDIN", buffer)
+        self._cursor.connection.commit()
+
+        self._cursor.execute(f"SELECT * FROM {table_name} LIMIT 5;")
+
+    def _retrieve_temp_symbols(
         self,
-    ):
+        sql_schema: str,
+        table_name: str,
+        temp_table_name: str,
+        start: datetime = None,
+        end: datetime = None,
+    ) -> pd.DataFrame:
+        """
+        Retrieve symbols from the temporary table.
+        """
+        sql_schema = self._convert_for_SQL(sql_schema)
+        table_name = self._convert_for_SQL(table_name)
+        temp_table_name = self._convert_for_SQL(temp_table_name)
+
+        if start and end:
+            date_query = f" WHERE t.ts_event BETWEEN '{start}' AND '{end}'"
+        elif start:
+            date_query = f" WHERE t.ts_event >= '{start}'"
+        elif end:
+            date_query = f" WHERE t.ts_event <= '{end}'"
+        else:
+            date_query = ""
 
         query = (
-            " SELECT schema_name FROM information_schema.schemata ORDER BY schema_name"
+            f' SELECT t.* FROM "{sql_schema}"."{table_name}" t JOIN {temp_table_name} s ON t.symbol = s.symbol'
+            + date_query
         )
         self._cursor.execute(query)
-        rows = self._cursor.fetchall()
-        datasets = [row[0] for row in rows]
-        return datasets
+        data = self._cursor.fetchall()
+        df = pd.DataFrame(data, columns=[col[0] for col in self._cursor.description])
+        df["ts_event"] = pd.to_datetime(df["ts_event"], format="%Y-%m-%d %H:%M:%S")
 
-    def _get_schemas(self, dataset: str) -> List[str]:
-        """
-        Get the schemas in the database
-        """
-        dataset = self._convert_for_SQL(dataset)
-        query = f"SELECT table_name FROM information_schema.tables WHERE table_schema = '{dataset}'"
-        self._cursor.execute(query)
-        rows = self._cursor.fetchall()
-        schemas = [row[0] for row in rows]
-        return schemas
+        return df
 
-    def _get_symbols(self, dataset: str, schema: str) -> List[str]:
-        """
-        Get the symbols in the database
-        """
-        dataset = self._convert_for_SQL(dataset)
-        schema = self._convert_for_SQL(schema)
-        query = f'SELECT DISTINCT symbol FROM "{dataset}"."{schema}"'
-        self._cursor.execute(query)
-        rows = self._cursor.fetchall()
-        symbols = [row[0] for row in rows]
-        return symbols
+    ##### Permissions #####
 
-    def _disconnect(self):
-        """
-        Disconnect from the database
-        """
-        self._cursor.close()
-        self._cursor.connection.close()
-        print("Database connection closed.")
-
-    def _download(self, data_dict: dict, path: str | Path = None, filetype="csv"):
-        """
-        Download the data from the database
-        """
-        path = Path(path or ".")
-
-        path.mkdir(parents=True, exist_ok=True)
-
-        ext = filetype.lower()
-
-        for schema, symbols in data_dict.items():
-            for symbol, data in symbols.items():
-
-                filepath = (
-                    path
-                    / f"{schema}_{symbol}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{ext}"
-                )
-                writer = getattr(data, f"to_{ext}", None)
-                if writer is None:
-                    raise ValueError(f"Unsupported file type: {ext}")
-
-                kwargs = {}
-                if ext in ("csv", "xls", "xlsx", "html"):
-                    kwargs["index"] = False
-                elif ext == "parquet":
-                    kwargs["compression"] = "gzip"
-                elif ext == "json":
-                    kwargs["orient"] = "records"
-
-                writer(filepath, **kwargs)
-                print(f"Data downloaded to {filepath}")
-
-    def _add_perms(self, dataset: str):
+    def _add_permissions(self, sql_schema: str) -> None:
         """
         Add permissions to the dataset and schema
         """
-        dataset = self._convert_for_SQL(dataset)
-        query = f"GRANT USAGE, CREATE ON SCHEMA {dataset} TO PUBLIC;"
-        query2 = f"""ALTER DEFAULT PRIVILEGES IN SCHEMA {dataset}
+        query = f"GRANT USAGE, CREATE ON SCHEMA {sql_schema} TO PUBLIC;"
+        query2 = f"""ALTER DEFAULT PRIVILEGES IN SCHEMA {sql_schema}
                     GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO PUBLIC;"""
         query += query2
         self._cursor.execute(query)

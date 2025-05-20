@@ -1,142 +1,138 @@
 import databento as dbn
 import os
-from datetime import datetime, timedelta, timezone
-from dateutil.parser import isoparse
-from typing import List
-import polars as pl
+from typing import List, Optional, Dict, Any, Tuple
+from datetime import datetime
+import pandas as pd
 
 
 class DBNClient:
-    """
-    Databento Client Wrapper"""
 
     def __init__(self):
-
         if "DATABENTO_API_KEY" not in os.environ:
             raise ValueError("Missing Databento API key")
 
         self._client = dbn.Historical()
         print("Databento client initialized.")
 
-    def _download_data(
+    def get_data(
         self,
         dataset: str,
         schema: str,
         symbol: str,
-        start: str,
-        end: str,
-    ):
+        ranges: List[Tuple[datetime, datetime]],
+        stype_in: str = "raw_symbol",
+        stype_out: str = "instrument_id",
+    ) -> Tuple[Dict[str, Any], list]:
         """
-        Download data from Databento
+        Get data from Databento for a given dataset and schema.
         """
 
-        data = self._client.timeseries.get_range(
-            dataset=dataset,
-            schema=schema,
-            symbols=symbol,
-            start=start,
-            end=end,
-        ).to_df()
+        data = []
+        for start, end in ranges:
+            data_fragment = self._client.timeseries.get_range(
+                dataset=dataset,
+                schema=schema,
+                symbols=symbol,
+                start=start,
+                end=end,
+                stype_in=stype_in,
+                stype_out=stype_out,
+            ).to_df()
+            data_fragment.reset_index(inplace=True)
+            data.append(data_fragment)
+
+        data = pd.concat(data)
+
         return data
 
-    def _get_dataset_range(
+    def _get_col_dict(self, schema: str) -> list:
+        """
+        Get the column dictionary for a given dataset and schema.
+        """
+
+        cols = self._client.metadata.list_fields(schema, "csv")
+
+        for col in cols:
+            if col["name"] in ("ts_event", "ts_recv"):
+                col["type"] = "timestamp"
+
+        # symbol always appears at the end
+        cols.append({"name": "symbol", "type": "string"})
+
+        return cols
+
+    def _resolve_symbology(
         self,
         dataset: str,
-    ) -> tuple[datetime, datetime]:
-        """
-        Get the range of a dataset
-        """
-        range = self._client.metadata.get_dataset_range(dataset)
-        start_str = range["start"]
-        end_str = range["end"]
-        start = isoparse(start_str)
-        end = isoparse(end_str)
+        symbols: List[str] | str,
+        stype_in: str,
+        stype_out: str,
+        start_date,
+        end_date,
+    ) -> None:
 
-        if (
-            end.hour == 4
-            and end.minute == 0
-            and end.second == 0
-            and end.microsecond == 0
-        ):
-            prev = end - timedelta(days=1)
-            end = datetime(
-                prev.year,
-                prev.month,
-                prev.day,
-                23,
-                58,
-                tzinfo=None,
+        symbols = symbols if isinstance(symbols, list) else [symbols]
+        if any(item.endswith((".OPT", ".FUT")) for item in symbols):
+
+            symbols = [
+                symbol for symbol in symbols if symbol.endswith((".FUT", ".OPT"))
+            ]
+
+            symbology = self._client.symbology.resolve(
+                dataset=dataset,
+                symbols=symbols,
+                stype_in=stype_in,
+                stype_out=stype_out,
+                start_date=start_date,
+                end_date=end_date,
             )
 
-        return start, end
+            symbols = list(symbology["result"].keys()) + symbology["partial"]
+            return symbols
+        else:
+            return symbols
 
-    def _get_columns(
-        self,
-        dataset: str,
-        schema: str | List[str],
-    ) -> dict[list[str]]:
-        """
-        Get the columns in the schema from Databento and prepare them for Database
-        """
-        if isinstance(schema, str):
-            schema = [schema]
-
-        col_dict = {}
-
-        # validate dataset and schema
-        for s in schema:
-            cols = self._client.metadata.list_fields(s, "csv")
-
-            for col in cols:
-                if col["name"] in ("ts_event", "ts_recv"):
-                    col["type"] = "timestamp"
-
-            # symbol always appears at the end
-            cols.append({"name": "symbol", "type": "string"})
-            col_dict[s] = cols
-
-        return col_dict
-
-    def _validate_schema_and_dataset(self, dataset: str, schema: list[str]) -> None:
-        """
-        Validate the dataset and schema in Databento
-        """
-        if not self._validate_dataset(dataset):
-            raise ValueError(f"Dataset {dataset} not found in Databento.")
-        for s in schema:
-            if not self._validate_schema(dataset, s):
-                raise ValueError(f"Schema {s} not found in Databento.")
+    ### validation functions ###
 
     def _validate_dataset(self, dataset: str) -> bool:
+        """
+        Validate if the dataset exists in Databento.
+        """
         if dataset not in self._client.metadata.list_datasets():
             print(f"Dataset {dataset} not found in Databento.")
             return False
         return True
 
     def _validate_schema(self, dataset: str, schema: str) -> bool:
+        """
+        Validate if the schema exists in Databento.
+        """
         if schema not in self._client.metadata.list_schemas(dataset):
             print(f"Schema {schema} not found in Databento.")
             return False
         return True
 
-    def _calculate_cost(
+    def _get_cost(
         self,
         dataset: str,
         schema: str,
         symbol: str,
-        start: str,
-        end: str,
+        ranges: List[Tuple[datetime, datetime]],
+        stype_in: str,
     ) -> float:
         """
-        Calculate the cost of downloading data from Databento
+        Get the cost of a given dataset and schema.
         """
+        total_cost = 0.0
+        for start, end in ranges:
+            cost = self._client.metadata.get_cost(
+                dataset=dataset,
+                schema=schema,
+                symbols=symbol,
+                start=start,
+                end=end,
+                stype_in=stype_in,
+            )
+            total_cost += cost
 
-        # Get the size of the data
-        cost = self._client.metadata.get_cost(
-            dataset=dataset,
-            schema=schema,
-            symbols=symbol,
-            start=start,
-            end=end,
-        )
-        return cost
+        return total_cost
