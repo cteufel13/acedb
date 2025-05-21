@@ -68,3 +68,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## Contact
 Project Link: [https://github.com/cteufel13/acedb](https://github.com/cteufel13/acedb)
+
+## More Details:
+
+Take a look at the [documentation](docs/index.md)

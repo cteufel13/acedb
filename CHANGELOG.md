@@ -5,6 +5,16 @@ _All notable changes to this project will be documented in this file._
 This project adheres to [Semantic Versioning](https://semver.org/) and this changelog follows the “Keep a Changelog” format.
 
 
+## [0.1.5] - 2025-05-21
+
+## Changed
+
+- Refactored and Reworked most of the main components, the main class and databento and postgres clients to include some features that were previously not available as it was.
+
+## Addded
+
+- Added compatibility with FRED API for macroeconomic data
+
 ## [0.1.4] - 2025-05-05
 
 ## Changed
