@@ -1,7 +1,7 @@
 import databento as dbn
 import os
 from typing import List, Optional, Dict, Any, Tuple
-from datetime import datetime
+from datetime import datetime, timedelta
 import pandas as pd
 
 
@@ -67,28 +67,40 @@ class DBNClient:
         symbols: List[str] | str,
         stype_in: str,
         stype_out: str,
-        start_date,
-        end_date,
-    ) -> None:
+        start_date: datetime,
+        end_date: datetime,
+    ) -> List[str]:
 
         symbols = symbols if isinstance(symbols, list) else [symbols]
+
         if any(item.endswith((".OPT", ".FUT")) for item in symbols):
 
             symbols = [
                 symbol for symbol in symbols if symbol.endswith((".FUT", ".OPT"))
             ]
 
-            symbology = self._client.symbology.resolve(
-                dataset=dataset,
-                symbols=symbols,
-                stype_in=stype_in,
-                stype_out=stype_out,
-                start_date=start_date,
-                end_date=end_date,
-            )
+            max_span = timedelta(days=365 * 3)
+            result_symbols = []
 
-            symbols = list(symbology["result"].keys()) + symbology["partial"]
-            return symbols
+            current_start = start_date
+            while current_start < end_date:
+                current_end = min(current_start + max_span, end_date)
+
+                symbology = self._client.symbology.resolve(
+                    dataset=dataset,
+                    symbols=symbols,
+                    stype_in=stype_in,
+                    stype_out=stype_out,
+                    start_date=current_start,
+                    end_date=current_end,
+                )
+
+                result_symbols.extend(list(symbology["result"].keys()))
+                result_symbols.extend(symbology["partial"])
+
+                current_start = current_end
+
+            return list(set(result_symbols))  # remove duplicates
         else:
             return symbols
 

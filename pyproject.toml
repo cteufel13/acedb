@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "acedb"
-version = "0.1.5"
+version = "0.1.6"
 description = "Wrapper for ACE ETH Postgres database"
 readme = "README.md"
 license = { text = "MIT" }
@@ -23,6 +23,7 @@ dependencies = [
     "click==8.1.8",
     "build==1.2.2.post1",
     "setuptools==65.5.0",
+    "fredapi==0.5.2"
 ]
 
 [project.scripts]

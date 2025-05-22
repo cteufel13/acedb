@@ -208,7 +208,7 @@ class AceDB:
                         )
                         print(f"Cost of {total_cost} for {schema} and {symbol}.")
                         if total_cost > 0 and self._ask_yn(
-                            f"Cost of {total_cost} for {schema} and {symbol}. Proceed? (y/n): "
+                            f"Cost of {total_cost} for {schema} and {symbol}. Proceed? Type y or n and then press Enter: "
                         ):
                             data = self._databento_client.get_data(
                                 dataset=dataset,
@@ -240,6 +240,7 @@ class AceDB:
                     start_date=start,
                     end_date=end,
                 )
+                print(len(child_symbols))
                 results = self.retrieve_dbn_from_database(
                     dataset=dataset,
                     schemas=schemas,
